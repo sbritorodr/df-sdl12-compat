@@ -10,8 +10,6 @@ jobs:
       matrix:
         platform:
         - { name: Windows, os: windows-latest }
-        - { name: Linux,   os: ubuntu-20.04, flags: -GNinja }
-        - { name: MacOS,   os: macos-latest }
     steps:
     - name: Setup Linux dependencies
       if: runner.os == 'Linux'
