@@ -1,6 +1,6 @@
 name: Build
 
-on: [push, pull_request, workflow_dispatch]
+on: [workflow_dispatch]
 
 jobs:
   Build:
@@ -28,3 +28,16 @@ jobs:
       run: cmake -DSDL2_INCLUDE_DIR="${{ github.workspace }}/SDL2/include" -B build ${{ matrix.platform.flags }}
     - name: Build
       run: cmake --build build/
+    - name: Automatic Releases
+      uses: marvinpinto/action-automatic-releases@v1.2.1
+      with:
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        automatic_release_tag: "latest"
+        prerelease: true
+        draft: true
+        title: "SDL1.2-compat release"
+        files: |
+          LICENSE.txt
+          *.dll
+        
+
