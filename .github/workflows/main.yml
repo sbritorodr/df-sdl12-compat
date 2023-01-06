@@ -40,7 +40,7 @@ jobs:
 
     # Moves SDL2.dll to debug subdir
     - name: Move SDL.dll
-      run: move D:\a\df-sdl12-compat\df-sdl12-compat\build\debug\SDL.dll D:\a\df-sdl12-compat\DF-SDL12-COMPAT\SDL.dll
+      run: move D:\a\df-sdl12-compat\df-sdl12-compat\build\Release\SDL.dll D:\a\df-sdl12-compat\DF-SDL12-COMPAT\SDL.dll
 
     - name: Show file structure
       run: tree "D:"/F
