@@ -25,9 +25,9 @@ jobs:
         ref: release-2.0.18
         path: SDL2
     - name: Configure CMake
-      run: cmake -DSDL2_INCLUDE_DIR="${{ github.workspace }}/SDL2/include" -B build ${{ matrix.platform.flags }} -DCMAKE_BUILD_TYPE=Release
+      run: cmake -DSDL2_INCLUDE_DIR="${{ github.workspace }}/SDL2/include" -B build ${{ matrix.platform.flags }}
     - name: Build
-      run: cmake --build build/
+      run: cmake --build build/ --config Release
       
   
     # Downloads .zip from libsdl-org repo
