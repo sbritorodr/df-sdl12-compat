@@ -1,4 +1,4 @@
-name: Build for Windows
+name: Build for Linux
 
 on: [workflow_dispatch]
 
@@ -9,7 +9,7 @@ jobs:
     strategy:
       matrix:
         platform:
-        - { name: Windows, os: windows-latest }
+        - { name: Linux,   os: ubuntu-20.04, flags: -GNinja }
     steps:
     - name: Setup Linux dependencies
       if: runner.os == 'Linux'
@@ -40,10 +40,12 @@ jobs:
 
     # Moves SDL2.dll to debug subdir
     - name: Move SDL.dll
-      run: move D:\a\df-sdl12-compat\df-sdl12-compat\build\Release\SDL.dll D:\a\df-sdl12-compat\DF-SDL12-COMPAT\SDL.dll
+      echo: ${{ runner.os }}
+      if: runner.os == 'Windows'
+      run: mv D:/a/df-sdl12-compat/df-sdl12-compat/build/Release/SDL D:/a/df-sdl12-compat/DF-SDL12-COMPAT/SDL
 
     - name: Show file structure
-      run: tree "D:"/F
+      run: tree "./"-F
       
     - name: Automatic Releases
       uses: marvinpinto/action-automatic-releases@v1.2.1
@@ -55,5 +57,5 @@ jobs:
         title: "SDL1.2-compat release"
         files: |
           LICENSE.txt
-          SDL.dll
-          SDL2.dll
+          SDL
+          SDL2
