@@ -25,9 +25,9 @@ jobs:
         ref: release-2.0.18
         path: SDL2
     - name: Configure CMake
-      run: cmake -DSDL2_INCLUDE_DIR="${{ github.workspace }}/SDL2/include" -DCMAKE_BUILD_TYPE=Release . -B build ${{ matrix.platform.flags }}
+      run: cmake -DSDL2_INCLUDE_DIR="${{ github.workspace }}/SDL2/include" -B build ${{ matrix.platform.flags }}
     - name: Build
-      run: cmake --build build/
+      run: cmake --build build/ --config Release
       
   
     # Downloads .zip from libsdl-org repo
@@ -40,7 +40,7 @@ jobs:
 
     # Moves SDL2.dll to debug subdir
     - name: Move SDL.dll
-      run: move D:\a\df-sdl12-compat\df-sdl12-compat\build\debug\SDL.dll D:\a\df-sdl12-compat\DF-SDL12-COMPAT\SDL.dll
+      run: move D:\a\df-sdl12-compat\df-sdl12-compat\build\Release\SDL.dll D:\a\df-sdl12-compat\DF-SDL12-COMPAT\SDL.dll
 
     - name: Show file structure
       run: tree "D:"/F
