@@ -1,3 +1,6 @@
+# Notes for this fork
+This fork's only purpose is making automatic builds of sdl12-compat avaliable for people who doesn't know how to compile it or how to install Visual Studio. Please **do not bother the SDL devs**, keep in mind these are just community driven fixes for a popular videogame. Until bay12games or Kitfox Games decide to upgrade the game code to SDL2.0 expect having graphical glitches or not working properly.
+
 # Simple DirectMedia Layer (SDL) sdl12-compat
 
 https://www.libsdl.org/
