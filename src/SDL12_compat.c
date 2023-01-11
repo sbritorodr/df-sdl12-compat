@@ -6195,7 +6195,7 @@ SetVideoModeImpl(int width, int height, int bpp, Uint32 flags12)
         }
 
         VideoSurface12->flags &= ~SDL12_OPENGL;
-        VideoSurface12->surface20->pixels = SDL20_malloc(height * VideoSurface12->pitch);
+        VideoSurface12->surface20->pixels = SDL20_calloc(height, VideoSurface12->pitch);
         VideoSurface12->pixels = VideoSurface12->surface20->pixels;
         if (!VideoSurface12->pixels) {
             SDL20_OutOfMemory();
@@ -6483,18 +6483,25 @@ SDL_SetAlpha(SDL12_Surface *surface12, Uint32 flags12, Uint8 value)
 DECLSPEC12 int SDLCALL
 SDL_LockSurface(SDL12_Surface *surface12)
 {
-    const int retval = SDL20_LockSurface(surface12->surface20);
-    surface12->pixels = surface12->surface20->pixels;
-    surface12->pitch = surface12->surface20->pitch;
+    int retval = 0;
+    /* just pretend to lock for the screen surface, but ignore it. */
+    if (surface12 != VideoSurface12) {
+        retval = SDL20_LockSurface(surface12->surface20);
+        surface12->pixels = surface12->surface20->pixels;
+        surface12->pitch = surface12->surface20->pitch;
+    }
     return retval;
 }
 
 DECLSPEC12 void SDLCALL
 SDL_UnlockSurface(SDL12_Surface *surface12)
 {
-    SDL20_UnlockSurface(surface12->surface20);
-    surface12->pixels = surface12->surface20->pixels;
-    surface12->pitch = surface12->surface20->pitch;
+    /* just pretend to lock for the screen surface, but ignore it. */
+    if (surface12 != VideoSurface12) {
+        SDL20_UnlockSurface(surface12->surface20);
+        surface12->pixels = surface12->surface20->pixels;
+        surface12->pitch = surface12->surface20->pitch;
+    }
 }
 
 DECLSPEC12 int SDLCALL
@@ -8351,7 +8358,27 @@ SDL_LoadWAV_RW(SDL12_RWops *rwops12, int freerwops12,
                SDL_AudioSpec *spec, Uint8 **buf, Uint32 *len)
 {
     SDL_RWops *rwops20 = RWops12to20(rwops12);
-    SDL_AudioSpec *retval = SDL20_LoadWAV_RW(rwops20, freerwops12, spec, buf, len);
+    SDL_AudioSpec *retval = NULL;
+
+    *buf = NULL;
+
+    /* SDL2's LoadWAV requires a seekable stream, but SDL 1.2 didn't,
+       so if the stream appears unseekable, try to load it into a
+       memory rwops that we _can_ seek in */
+    if (rwops20->seek(rwops20, 0, RW_SEEK_CUR) != -1) {  /* if seekable */
+        retval = SDL20_LoadWAV_RW(rwops20, freerwops12, spec, buf, len);
+    } else {
+        size_t datasize = 0;
+        void *buffer = SDL20_LoadFile_RW(rwops20, &datasize, freerwops12);
+        if (buffer) {
+            SDL_RWops *memrwops20 = SDL20_RWFromConstMem(buffer, (int) datasize);
+            if (memrwops20) {
+                retval = SDL20_LoadWAV_RW(memrwops20, 1, spec, buf, len);
+            }
+            SDL_free(buffer);
+        }
+    }
+
     if (retval && retval->format & 0x20) {
         SDL20_SetError("Unsupported 32-bit PCM data format");
         SDL20_FreeWAV(*buf);
