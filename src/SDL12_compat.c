@@ -1230,6 +1230,9 @@ static QuirkEntryType quirks[] = {
     /* boswars has a bug where SDL_AudioCVT must not require extra buffer space. See Issue #232. */
     {"boswars", "SDL12COMPAT_COMPATIBILITY_AUDIOCVT", "1"},
 
+    /* grafx2 tries to do all sorts of stuff by talking directly to the X server, causing problems. */
+    {"grafx2", "SDL12COMPAT_ALLOW_SYSWM", "0"},
+
     /* The 32-bit Steam build only of Multiwinia Quits but doesn't re-Init */
     {"multiwinia.bin.x86", "SDL12COMPAT_NO_QUIT_VIDEO", "1"}
 #else
@@ -5430,10 +5433,11 @@ EndVidModeCreate(void)
         VideoPhysicalPalette20 = NULL;
     }
     if (VideoSurface12) {
+        SDL12_Surface *screen12 = VideoSurface12;
         SDL20_free(VideoSurface12->pixels);
         VideoSurface12->pixels = NULL;
-        SDL_FreeSurface(VideoSurface12);
-        VideoSurface12 = NULL;
+        VideoSurface12 = NULL;  /* SDL_FreeSurface will ignore the screen surface, so NULL the global variable out. */
+        SDL_FreeSurface(screen12);
     }
     if (VideoConvertSurface20) {
         SDL20_FreeSurface(VideoConvertSurface20);
@@ -6139,10 +6143,14 @@ SetVideoModeImpl(int width, int height, int bpp, Uint32 flags12)
         const SDL_bool want_vsync = (vsync_env && SDL20_atoi(vsync_env)) ? SDL_TRUE : SDL_FALSE;
         SDL_RendererInfo rinfo;
         SDL_assert(!VideoGLContext20);  /* either a new window or we destroyed all this */
-        VideoRendererLock = SDL20_CreateMutex();
+
         if (!VideoRendererLock) {
-            return EndVidModeCreate();
+            VideoRendererLock = SDL20_CreateMutex();
+            if (!VideoRendererLock) {
+                return EndVidModeCreate();
+            }
         }
+
         if (!VideoRenderer20 && want_vsync) {
             VideoRenderer20 = SDL20_CreateRenderer(VideoWindow20, -1, SDL_RENDERER_ACCELERATED|SDL_RENDERER_PRESENTVSYNC);
         }
