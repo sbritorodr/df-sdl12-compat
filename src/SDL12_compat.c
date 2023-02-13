@@ -57,8 +57,6 @@
 #undef snprintf
 #undef vsnprintf
 
-#define SDL_BlitSurface SDL_UpperBlit
-
 #ifdef __linux__
 #include <unistd.h> /* for readlink() */
 #endif
@@ -99,9 +97,18 @@ extern "C" {
 
 #define DECLSPEC12 DECLSPEC FORCEALIGNATTR
 
+/** Enable this to have warnings about wrong prototypes in SDL20_syms.h.
+ *  It won't compile but it helps to make sure it's sync'ed with SDL2 headers.
+ */
+#if 0
+#define SDL20_SYM(rc,fn,params,args,ret) \
+    typedef rc (SDLCALL *SDL20_##fn##_t) params; \
+    static SDL20_##fn##_t SDL20_##fn = IGNORE_THIS_VERSION_OF_SDL_##fn;
+#else
 #define SDL20_SYM(rc,fn,params,args,ret) \
     typedef rc (SDLCALL *SDL20_##fn##_t) params; \
     static SDL20_##fn##_t SDL20_##fn = NULL;
+#endif
 #include "SDL20_syms.h"
 
 /* Things that _should_ be binary compatible pass right through... */
@@ -116,6 +123,7 @@ extern "C" {
 #define SDL20_InvalidParamError(param) SDL20_SetError("Parameter '%s' is invalid", (param))
 #define SDL20_zero(x) SDL20_memset(&(x), 0, sizeof((x)))
 #define SDL20_zerop(x) SDL20_memset((x), 0, sizeof(*(x)))
+#define SDL20_zeroa(x) SDL20_memset((x), 0, sizeof((x)))
 #define SDL_ReportAssertion SDL20_ReportAssertion
 
 /* From SDL2.0's SDL_bits.h: a force-inlined function. */
@@ -1045,6 +1053,41 @@ SDL20_atoi(const char *str)
     return SDL20_strtol(str, NULL, 10);
 }
 
+static char *
+SDL12COMPAT_stpcpy(char *dst, const char *src)
+{
+    while ((*dst++ = *src++) != '\0') {
+        /**/;
+    }
+    return --dst;
+}
+
+static void
+SDL12COMPAT_itoa(char *dst, int val)
+{
+    char *ptr, temp;
+
+    if (val < 0) {
+        *dst++ = '-';
+        val = -val;
+    }
+    ptr = dst;
+
+    do {
+        *ptr++ = '0' + (val % 10);
+        val /= 10;
+    } while (val > 0);
+    *ptr-- = '\0';
+
+    /* correct the order of digits */
+    do {
+        temp = *dst;
+        *dst++ = *ptr;
+        *ptr-- = temp;
+    } while (ptr > dst);
+}
+
+
 /* Obviously we can't use SDL_LoadObject() to load SDL2.  :)  */
 static char loaderror[256];
 #if defined(_WIN32)
@@ -1056,16 +1099,12 @@ static char loaderror[256];
     #define LoadSDL20Library() ((Loaded_SDL20 = LoadLibraryA(SDL20_LIBNAME)) != NULL)
     #define LookupSDL20Sym(sym) (void *)GetProcAddress(Loaded_SDL20, sym)
     #define CloseSDL20Library() { if (Loaded_SDL20) { FreeLibrary(Loaded_SDL20); Loaded_SDL20 = NULL; } }
-    #define strcpy_fn  lstrcpyA
-    #define sprintf_fn wsprintfA
 #elif defined(__OS2__)
     #include <os2.h>
     #define DIRSEP "\\"
     #define SDL20_LIBNAME "SDL2.dll"
     #define SDL20_LIBNAME2 "SDL2"       /* if loading from LIBPATH */
     #define SDL20_REQUIRED_VER SDL_VERSIONNUM(2,0,7)
-    #define strcpy_fn  strcpy
-    #define sprintf_fn sprintf
     static HMODULE Loaded_SDL20 = NULLHANDLE;
     static SDL_bool LoadSDL20Library(void) {
         char err[256];
@@ -1096,8 +1135,6 @@ static char loaderror[256];
     #define SDL20_LIBNAME2 "libSDL2-2.0.dylib"
     #define SDL20_FRAMEWORK "SDL2.framework/Versions/A/SDL2"
     #define SDL20_REQUIRED_VER SDL_VERSIONNUM(2,0,7)
-    #define strcpy_fn  strcpy
-    #define sprintf_fn sprintf
     static void *Loaded_SDL20 = NULL;
     #define LookupSDL20Sym(sym) dlsym(Loaded_SDL20, sym)
     #define CloseSDL20Library() { if (Loaded_SDL20) { dlclose(Loaded_SDL20); Loaded_SDL20 = NULL; } }
@@ -1154,8 +1191,6 @@ static char loaderror[256];
     #define LoadSDL20Library() ((Loaded_SDL20 = dlopen(SDL20_LIBNAME, RTLD_LOCAL|RTLD_NOW)) != NULL)
     #define LookupSDL20Sym(sym) dlsym(Loaded_SDL20, sym)
     #define CloseSDL20Library() { if (Loaded_SDL20) { dlclose(Loaded_SDL20); Loaded_SDL20 = NULL; } }
-    #define strcpy_fn  strcpy
-    #define sprintf_fn sprintf
 #else
     #error Please define your platform.
 #endif
@@ -1171,7 +1206,8 @@ LoadSDL20Symbol(const char *fn, int *okay)
     if (*okay) { /* only bother trying if we haven't previously failed. */
         retval = LookupSDL20Sym(fn);
         if (retval == NULL) {
-            sprintf_fn(loaderror, "%s missing in SDL2 library.", fn);
+            char *p = SDL12COMPAT_stpcpy(loaderror, fn);
+            SDL12COMPAT_stpcpy(p, " missing in SDL2 library.");
             *okay = 0;
         }
     }
@@ -1398,7 +1434,7 @@ LoadSDL20(void)
 
         okay = LoadSDL20Library();
         if (!okay) {
-            strcpy_fn(loaderror, "Failed loading SDL2 library.");
+            SDL12COMPAT_stpcpy(loaderror, "Failed loading SDL2 library.");
         } else {
             #define SDL20_SYM(rc,fn,params,args,ret) SDL20_##fn = (SDL20_##fn##_t) LoadSDL20Symbol("SDL_" #fn, &okay);
             #include "SDL20_syms.h"
@@ -1408,7 +1444,19 @@ LoadSDL20(void)
                 LinkedSDL2VersionInt = SDL_VERSIONNUM(v.major, v.minor, v.patch);
                 okay = (LinkedSDL2VersionInt >= SDL20_REQUIRED_VER);
                 if (!okay) {
-                    sprintf_fn(loaderror, "SDL2 %d.%d.%d library is too old.", v.major, v.minor, v.patch);
+                    char value[12];
+                    char *p = SDL12COMPAT_stpcpy(loaderror, "SDL2 ");
+
+                    SDL12COMPAT_itoa(value, v.major);
+                    p = SDL12COMPAT_stpcpy(p, value);
+                    *p++ = '.';
+                    SDL12COMPAT_itoa(value, v.minor);
+                    p = SDL12COMPAT_stpcpy(p, value);
+                    *p++ = '.';
+                    SDL12COMPAT_itoa(value, v.patch);
+                    p = SDL12COMPAT_stpcpy(p, value);
+
+                    SDL12COMPAT_stpcpy(p, " library is too old.");
                 } else {
                     WantDebugLogging = SDL12Compat_GetHintBoolean("SDL12COMPAT_DEBUG_LOGGING", SDL_FALSE);
                     if (WantDebugLogging) {
@@ -1872,7 +1920,8 @@ SDL_JoystickGetBall(SDL12_Joystick *stick12, int ball, int *dx, int *dy)
 {
     if (BogusJoystick(stick12)) {
         return 0;
-    } else if (JoysticksAreGameControllers) {
+    }
+    if (JoysticksAreGameControllers) {
         if (dx) { *dx = 0; }
         if (dy) { *dy = 0; }
         return SDL20_SetError("No joystick balls available");
@@ -2023,15 +2072,12 @@ GetVideoDisplay(void)
     }
     if (variable) {
         int preferred_display = SDL20_atoi(variable);
-        
         if (preferred_display < 0 || preferred_display >= SDL20_GetNumVideoDisplays()) {
             return 0;
         }
-
         return SDL20_atoi(variable);
-    } else {
-        return 0;
     }
+    return 0;
 }
 
 /* returns true if mode1 should sort before mode2 */
@@ -2040,11 +2086,11 @@ VidModeSizeGreater(SDL12_Rect *mode1, SDL12_Rect *mode2)
 {
     if (mode1->w > mode2->w) {
         return 1;
-    } else if (mode2->w > mode1->w) {
-        return 0;
-    } else {
-        return (mode1->h > mode2->h);
     }
+    if (mode2->w > mode1->w) {
+        return 0;
+    }
+    return (mode1->h > mode2->h);
 }
 
 static int
@@ -2666,9 +2712,8 @@ GetDriverName(const char *name, char *namebuf, int maxlen)
         if (namebuf) {
             SDL20_strlcpy(namebuf, name, maxlen);
             return namebuf;
-        } else {
-            return name;
         }
+        return name;
     }
     return NULL;
 }
@@ -3337,7 +3382,8 @@ Keysym20to12(const SDL_Keycode keysym20)
          * and so does the Latin-1 range (128-255) */
         if (keysym20 == SDLK_PAUSE) {
             return SDLK12_PAUSE;
-        } else if (keysym20 == SDLK_CLEAR) {
+        }
+        if (keysym20 == SDLK_CLEAR) {
             return SDLK12_CLEAR;
         }
         return (SDL12Key) keysym20;
@@ -4570,8 +4616,7 @@ EventFilter20to12(void *data, SDL_Event *event20)
             }
 
             /* some programs rely on unicode values for these control characters */
-            switch (PendingKeydownEvent.key.keysym.sym)
-            {
+            switch (PendingKeydownEvent.key.keysym.sym) {
                 case SDLK12_BACKSPACE:
                     FlushPendingKeydownEvent('\b');
                     break;
@@ -4861,7 +4906,8 @@ Surface20to12(SDL_Surface *surface20)
 
     if (!surface20) {
         return NULL;
-    } else if (surface20->pitch > 65535) {
+    }
+    if (surface20->pitch > 65535) {
         SDL20_SetError("Pitch is too large");  /* can't fit to 16-bits */
         return NULL;
     }
@@ -5281,7 +5327,8 @@ SDL_ListModes(const SDL12_PixelFormat *format12, Uint32 flags)
         VideoModeList *modes = &VideoModes[i];
         if (SDL_BITSPERPIXEL(modes->format) == bpp) {
             return modes->modes12;
-        } else if (SDL_BITSPERPIXEL(modes->format) == 24 && bpp == 32) {
+        }
+        if (SDL_BITSPERPIXEL(modes->format) == 24 && bpp == 32) {
             best_modes = modes;
         } else if (SDL_BITSPERPIXEL(modes->format) > bpp) {
             if (!best_modes || SDL_BITSPERPIXEL(modes->format) > SDL_BITSPERPIXEL(best_modes->format)) {
@@ -5448,7 +5495,7 @@ EndVidModeCreate(void)
         VideoConvertSurface20 = NULL;
     }
 
-    SDL_zero(OpenGLFuncs);
+    SDL20_zero(OpenGLFuncs);
     OpenGLBlitLockCount = 0;
     OpenGLLogicalScalingWidth = 0;
     OpenGLLogicalScalingHeight = 0;
@@ -5509,7 +5556,7 @@ LoadOpenGLFunctions(void)
     int major = 0, minor = 0;
 
     /* load core functions so we can guess about a few other things. */
-    SDL_zero(OpenGLFuncs);
+    SDL20_zero(OpenGLFuncs);
     OpenGLFuncs.SUPPORTS_Core = SDL_TRUE;
     #define OPENGL_SYM(ext,rc,fn,params,args,ret) OpenGLFuncs.fn = \
            (OpenGLFuncs.SUPPORTS_##ext)? (openglfn_##fn##_t)SDL20_GL_GetProcAddress(#fn) : NULL;
@@ -5961,7 +6008,7 @@ SetVideoModeImpl(int width, int height, int bpp, Uint32 flags12)
             SDL20_GL_MakeCurrent(NULL, NULL);
             SDL20_GL_DeleteContext(VideoGLContext20);
             VideoGLContext20 = NULL;
-            SDL_zero(OpenGLFuncs);
+            SDL20_zero(OpenGLFuncs);
             OpenGLBlitTexture = 0;
             OpenGLBlitLockCount = 0;
             OpenGLLogicalScalingWidth = 0;
@@ -6401,9 +6448,11 @@ SDL_UpperBlit(SDL12_Surface *src12, SDL12_Rect *srcrect12, SDL12_Surface *dst12,
 
     if ((src12 == NULL) || (dst12 == NULL)) {
         return SDL20_SetError("SDL_UpperBlit: passed a NULL surface");
-    } else if ((src12->pixels == NULL) || (dst12->pixels == NULL)) {
+    }
+    if ((src12->pixels == NULL) || (dst12->pixels == NULL)) {
         return SDL20_SetError("SDL_UpperBlit: passed a surface with NULL pixels");
-    } else if (SaveDestAlpha(src12, dst12, &dstrect20, &dstalpha) < 0) {
+    }
+    if (SaveDestAlpha(src12, dst12, &dstrect20, &dstalpha) < 0) {
         return -1;
     }
 
@@ -6848,9 +6897,11 @@ SDL_UpdateRects(SDL12_Surface *surface12, int numrects, SDL12_Rect *rects12)
 
             if (!renderer) {
                 continue;
-            } else if (!rect20.w || !rect20.h) {
+            }
+            if (!rect20.w || !rect20.h) {
                 continue;
-            } else if (SDL20_LockTexture(VideoTexture20, &rect20, &pixels, &pitch) < 0) {
+            }
+            if (SDL20_LockTexture(VideoTexture20, &rect20, &pixels, &pitch) < 0) {
                 continue;  /* oh well */
             }
 
@@ -7312,7 +7363,8 @@ SDL_GetWMInfo(SDL12_SysWMinfo *info12)
     if (info12->version.major > 1) {
         SDL20_SetError("Requested version is unsupported");
         return 0;  /* some programs only test against 0, not -1 */
-    } else if (!SupportSysWM) {
+    }
+    if (!SupportSysWM) {
         SDL20_SetError("No SysWM support available");
         return 0;  /* some programs only test against 0, not -1 */
     }
@@ -7326,7 +7378,7 @@ SDL_GetWMInfo(SDL12_SysWMinfo *info12)
         temp_window = SDL_TRUE;
     }
 
-    SDL_zero(info20);
+    SDL20_zero(info20);
 
     /* SDL2, before the version scheme change, would fail if the requested version wasn't
        2.0.x, so if the SDL2 is from before this was fixed, we need to lie about the
@@ -7514,9 +7566,11 @@ SDL_DisplayYUVOverlay(SDL12_Overlay *overlay12, SDL12_Rect *dstrect12)
 
     if (!overlay12) {
         return SDL20_InvalidParamError("overlay");
-    } else if (!dstrect12) {
+    }
+    if (!dstrect12) {
         return SDL20_InvalidParamError("dstrect");
-    } else if (!(renderer = LockVideoRenderer())) {
+    }
+    if (!(renderer = LockVideoRenderer())) {
         return SDL20_SetError("No software screen surface available");
     }
 
@@ -7702,11 +7756,11 @@ SDL_GL_SetAttribute(SDL12_GLattr attr, int value)
         SwapInterval = value;
         return 0;
     }
-    else if (attr == SDL12_GL_MULTISAMPLESAMPLES) {
+    if (attr == SDL12_GL_MULTISAMPLESAMPLES) {
         OpenGLLogicalScalingSamples = value;
         return 0;
     }
-    else if (attr == SDL12_GL_MULTISAMPLEBUFFERS) {
+    if (attr == SDL12_GL_MULTISAMPLEBUFFERS) {
         return 0;
     }
     return SDL20_GL_SetAttribute((SDL_GLattr) attr, value);
@@ -7725,11 +7779,11 @@ SDL_GL_GetAttribute(SDL12_GLattr attr, int* value)
         *value = SDL20_GL_GetSwapInterval();
         return 0;
     }
-    else if (attr == SDL12_GL_MULTISAMPLESAMPLES) {
+    if (attr == SDL12_GL_MULTISAMPLESAMPLES) {
         *value = OpenGLLogicalScalingSamples;
         return 0;
     }
-    else if (attr == SDL12_GL_MULTISAMPLEBUFFERS) {
+    if (attr == SDL12_GL_MULTISAMPLEBUFFERS) {
         *value = (OpenGLLogicalScalingSamples) ? 1 : 0;
         return 0;
     }
@@ -8205,7 +8259,7 @@ SDL_RWFromFile(const char *file, const char *mode)
 DECLSPEC12 SDL12_RWops * SDLCALL
 SDL_RWFromFP(void *io, int autoclose)
 {
-    return RWops20to12(SDL20_RWFromFP(io, autoclose));
+    return RWops20to12(SDL20_RWFromFP(io, autoclose ? SDL_TRUE : SDL_FALSE));
 }
 
 DECLSPEC12 SDL12_RWops * SDLCALL
@@ -8220,12 +8274,14 @@ SDL_RWFromConstMem(const void *mem, int size)
     return RWops20to12(SDL20_RWFromConstMem(mem, size));
 }
 
-#define READ_AND_BYTESWAP(endian, bits) \
-    DECLSPEC12 Uint##bits SDLCALL SDL_Read##endian##bits(SDL12_RWops *rwops12) { \
-        Uint##bits val; rwops12->read(rwops12, &val, sizeof (val), 1); \
-        return SDL_Swap##endian##bits(val); \
-    }
-
+#define READ_AND_BYTESWAP(endian, bits)            \
+DECLSPEC12 Uint##bits SDLCALL                      \
+SDL_Read##endian##bits(SDL12_RWops *rwops12)       \
+{                                                  \
+    Uint##bits val;                                \
+    rwops12->read(rwops12, &val, sizeof (val), 1); \
+    return SDL_Swap##endian##bits(val);            \
+}
 READ_AND_BYTESWAP(LE,16)
 READ_AND_BYTESWAP(BE,16)
 READ_AND_BYTESWAP(LE,32)
@@ -8234,11 +8290,13 @@ READ_AND_BYTESWAP(LE,64)
 READ_AND_BYTESWAP(BE,64)
 #undef READ_AND_BYTESWAP
 
-#define BYTESWAP_AND_WRITE(endian, bits) \
-    DECLSPEC12 int SDLCALL SDL_Write##endian##bits(SDL12_RWops *rwops12, Uint##bits val) { \
-        val = SDL_Swap##endian##bits(val); \
-        return rwops12->write(rwops12, &val, sizeof (val), 1); \
-    }
+#define BYTESWAP_AND_WRITE(endian, bits)                      \
+DECLSPEC12 int SDLCALL                                        \
+SDL_Write##endian##bits(SDL12_RWops *rwops12, Uint##bits val) \
+{                                                             \
+    val = SDL_Swap##endian##bits(val);                        \
+    return rwops12->write(rwops12, &val, sizeof (val), 1);    \
+}
 BYTESWAP_AND_WRITE(LE,16)
 BYTESWAP_AND_WRITE(BE,16)
 BYTESWAP_AND_WRITE(LE,32)
@@ -8713,7 +8771,7 @@ SDL_CDOpen(int drive)
 
     if (retval->numtracks > 0) {
         SDL_AudioSpec want;
-        SDL_zero(want);
+        SDL20_zero(want);
         want.freq = 44100;
         want.format = AUDIO_F32SYS;
         want.channels = 2;
@@ -8855,15 +8913,20 @@ SDL_CDPlayTracks(SDL12_CD *cdrom, int start_track, int start_frame, int ntracks,
 {
     if ((cdrom = ValidCDDevice(cdrom)) == NULL) {
         return -1;
-    } else if (cdrom->status == SDL12_CD_TRAYEMPTY) {
+    }
+    if (cdrom->status == SDL12_CD_TRAYEMPTY) {
         return SDL20_SetError("Tray empty");
-    } else if ((start_track < 0) || (start_track >= cdrom->numtracks)) {
+    }
+    if ((start_track < 0) || (start_track >= cdrom->numtracks)) {
         return SDL20_SetError("Invalid start track");
-    } else if ((start_frame < 0) || (((Uint32) start_frame) >= cdrom->track[start_track].length)) {
+    }
+    if ((start_frame < 0) || (((Uint32) start_frame) >= cdrom->track[start_track].length)) {
         return SDL20_SetError("Invalid start frame");
-    } else if ((ntracks < 0) || ((start_track + ntracks) >= cdrom->numtracks)) {
+    }
+    if ((ntracks < 0) || ((start_track + ntracks) >= cdrom->numtracks)) {
         return SDL20_SetError("Invalid number of tracks");
-    } else if ((nframes < 0) || (((Uint32) nframes) >= cdrom->track[start_track + ntracks].length)) {
+    }
+    if ((nframes < 0) || (((Uint32) nframes) >= cdrom->track[start_track + ntracks].length)) {
         return SDL20_SetError("Invalid number of frames");
     }
 
@@ -8888,11 +8951,14 @@ SDL_CDPlay(SDL12_CD *cdrom, int start, int length)
 
     if ((cdrom = ValidCDDevice(cdrom)) == NULL) {
         return -1;
-    } else if (cdrom->status == SDL12_CD_TRAYEMPTY) {
+    }
+    if (cdrom->status == SDL12_CD_TRAYEMPTY) {
         return SDL20_SetError("Tray empty");
-    } else if (start < 0) {
+    }
+    if (start < 0) {
         return SDL20_SetError("Invalid start");
-    } else if (length < 0) {
+    }
+    if (length < 0) {
         return SDL20_SetError("Invalid length");
     }
 
@@ -8939,7 +9005,8 @@ SDL_CDPause(SDL12_CD *cdrom)
 {
     if ((cdrom = ValidCDDevice(cdrom)) == NULL) {
         return -1;
-    } else if (cdrom->status == SDL12_CD_TRAYEMPTY) {
+    }
+    if (cdrom->status == SDL12_CD_TRAYEMPTY) {
         return SDL20_SetError("Tray empty");
     }
 
@@ -8959,7 +9026,8 @@ SDL_CDResume(SDL12_CD *cdrom)
 {
     if ((cdrom = ValidCDDevice(cdrom)) == NULL) {
         return -1;
-    } else if (cdrom->status == SDL12_CD_TRAYEMPTY) {
+    }
+    if (cdrom->status == SDL12_CD_TRAYEMPTY) {
         return SDL20_SetError("Tray empty");
     }
 
@@ -9442,7 +9510,7 @@ SDL_CloseAudio(void)
 static SDL_AudioCVT *
 AudioCVT12to20(const SDL12_AudioCVT *cvt12, SDL_AudioCVT *cvt20)
 {
-    SDL_zerop(cvt20);
+    SDL20_zerop(cvt20);
     cvt20->needed = cvt12->needed;
     cvt20->src_format = cvt12->src_format;
     cvt20->dst_format = cvt12->dst_format;
@@ -9460,7 +9528,7 @@ AudioCVT12to20(const SDL12_AudioCVT *cvt12, SDL_AudioCVT *cvt20)
 static SDL12_AudioCVT *
 AudioCVT20to12(const SDL_AudioCVT *cvt20, SDL12_AudioCVT *cvt12)
 {
-    SDL_zerop(cvt12);
+    SDL20_zerop(cvt12);
     cvt12->needed = cvt20->needed;
     cvt12->src_format = cvt20->src_format;
     cvt12->dst_format = cvt20->dst_format;
@@ -9559,7 +9627,7 @@ SDL_BuildAudioCVT(SDL12_AudioCVT *cvt12, Uint16 src_format, Uint8 src_channels, 
 {
     int retval = 0;
 
-    SDL_zerop(cvt12); /* SDL 1.2 derefences cvt12 without checking for NULL */
+    SDL20_zerop(cvt12); /* SDL 1.2 derefences cvt12 without checking for NULL */
 
     if (!WantCompatibilityAudioCVT) {
         SDL_AudioCVT cvt20;
