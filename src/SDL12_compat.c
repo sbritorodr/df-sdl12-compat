@@ -126,6 +126,21 @@ extern "C" {
 #define SDL20_zeroa(x) SDL20_memset((x), 0, sizeof((x)))
 #define SDL_ReportAssertion SDL20_ReportAssertion
 
+/* for SDL_assert() : */
+#define SDL_enabled_assert(condition) \
+do { \
+    while ( !(condition) ) { \
+        static struct SDL_AssertData sdl_assert_data = { 0, 0, #condition, 0, 0, 0, 0 }; \
+        const SDL_AssertState sdl_assert_state = SDL20_ReportAssertion(&sdl_assert_data, SDL_FUNCTION, SDL_FILE, SDL_LINE); \
+        if (sdl_assert_state == SDL_ASSERTION_RETRY) { \
+            continue; /* go again. */ \
+        } else if (sdl_assert_state == SDL_ASSERTION_BREAK) { \
+            SDL_TriggerBreakpoint(); \
+        } \
+        break; /* not retrying. */ \
+    } \
+} while (SDL_NULL_WHILE_LOOP_CONDITION)
+
 /* From SDL2.0's SDL_bits.h: a force-inlined function. */
 #if defined(__WATCOMC__) && defined(__386__)
 extern __inline int _SDL20_bsr_watcom(Uint32);
@@ -1448,11 +1463,9 @@ LoadSDL20(void)
                     char *p = SDL12COMPAT_stpcpy(loaderror, "SDL2 ");
 
                     SDL12COMPAT_itoa(value, v.major);
-                    p = SDL12COMPAT_stpcpy(p, value);
-                    *p++ = '.';
+                    p = SDL12COMPAT_stpcpy(p, value); *p++ = '.';
                     SDL12COMPAT_itoa(value, v.minor);
-                    p = SDL12COMPAT_stpcpy(p, value);
-                    *p++ = '.';
+                    p = SDL12COMPAT_stpcpy(p, value); *p++ = '.';
                     SDL12COMPAT_itoa(value, v.patch);
                     p = SDL12COMPAT_stpcpy(p, value);
 
@@ -1622,7 +1635,7 @@ SDL_revcpy(void *_dst, const void *_src, size_t len)
 
 
 /* SDL2 doesn't have MMXExt / 3dNowExt. */
-#if defined(__GNUC__) && defined(__i386__)
+#if (defined(__GNUC__) || defined(__llvm__)) && defined(__i386__)
 #define cpuid(func, a, b, c, d) \
     __asm__ __volatile__ ( \
 "        pushl %%ebx        \n" \
@@ -1631,7 +1644,7 @@ SDL_revcpy(void *_dst, const void *_src, size_t len)
 "        movl %%ebx, %%esi  \n" \
 "        popl %%ebx         \n" : \
             "=a" (a), "=S" (b), "=c" (c), "=d" (d) : "a" (func))
-#elif defined(__GNUC__) && defined(__x86_64__)
+#elif (defined(__GNUC__) || defined(__llvm__)) && defined(__x86_64__)
 #define cpuid(func, a, b, c, d) \
     __asm__ __volatile__ ( \
 "        pushq %%rbx        \n" \
@@ -1651,12 +1664,13 @@ SDL_revcpy(void *_dst, const void *_src, size_t len)
         __asm mov c, ecx \
         __asm mov d, edx \
 }
-#elif defined(_MSC_VER) && defined(_M_X64)
+#elif (defined(_MSC_VER) && defined(_M_X64))
+/* Use __cpuidex instead of __cpuid because ICL does not clear ecx register */
 #include <intrin.h>
 #define cpuid(func, a, b, c, d) \
 { \
     int CPUInfo[4]; \
-    __cpuid(CPUInfo, func); \
+    __cpuidex(CPUInfo, func, 0); \
     a = CPUInfo[0]; \
     b = CPUInfo[1]; \
     c = CPUInfo[2]; \
